@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { cache } from "../server";
 import {fromUrl, TypedArray} from "geotiff";
-import { computeNDVI, getMeanNDVI, getTokenCollection, isGoodPixel, lonLatToPixel, upscaleSCL } from "../utils/generalUtils";
+import { computeNDVI, getMeanNDVI, getMedianNDVI, getTokenCollection, isGoodPixel, lonLatToPixel, upscaleSCL } from "../utils/generalUtils";
 
 
 export const pointNDVIController = async (req: Request, res: Response) => {
@@ -23,6 +23,8 @@ export const pointNDVIController = async (req: Request, res: Response) => {
 
     // --- Sign URLs ---
     const token = await getTokenCollection()
+    console.log("token")
+    console.log(token)
     const cog_red_signed = `${cog_red}?${token}`
     const cog_nir_signed = `${cog_nir}?${token}`
     const cog_scl_signed = `${cog_scl}?${token}`
@@ -41,7 +43,8 @@ export const pointNDVIController = async (req: Request, res: Response) => {
 
     if(x === undefined || y === undefined ){
         return res.json({
-            NDVI: null,
+            meanNDVI: null,
+            medianNDVI: null,
             valid: false,
             validity: 0,
             reason: "Pixels are undefined",
@@ -55,7 +58,8 @@ export const pointNDVIController = async (req: Request, res: Response) => {
     const sclVal = await scl.readRasters({ window });
     if(!redVal || !nirVal || !sclVal){
         return res.json({
-            NDVI: null,
+            meanNDVI: null,
+            medianNDVI: null,
             valid: false,
             validity: 0,
             reason: "Rasters are undefined",
@@ -84,8 +88,8 @@ export const pointNDVIController = async (req: Request, res: Response) => {
     const validity = (validPixels / upscaledSCL.length) 
     if (validPixels == 0) {
         return res.json({
-            NDVI: null,
-            valid: false,
+            meanNDVI: null,
+            medianNDVI: null,
             validity: 0,
             reason: "Cloud or shadow mask",
             cache: "miss"
@@ -94,9 +98,11 @@ export const pointNDVIController = async (req: Request, res: Response) => {
     // --- Compute NDVI ---
     const ndviArray = computeNDVI(redVal[0] as TypedArray, nirVal[0] as TypedArray, sclVal[0] as TypedArray);
     const meanNDVI = getMeanNDVI(ndviArray)
+    const medianNDVI = getMedianNDVI(ndviArray)
     
     const result = {
-        NDVI: meanNDVI,
+        meanNDVI: meanNDVI,
+        medianNDVI: medianNDVI,
         valid: true,
         validity: validity,
         cache: "miss"

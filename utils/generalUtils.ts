@@ -169,6 +169,25 @@ export const getMeanNDVI = (
     : null;
 }
 
+export const getMedianNDVI = (
+  a_NDVI: Float32Array<ArrayBufferLike>,
+) => {
+  const sorted = Float32Array.from(a_NDVI).sort((a, b) => a - b);
+  const len = sorted.length
+  if(len == 1){
+    return sorted[0]
+  }
+  const mid = Math.floor(len / 2);
+  if(len % 2){
+    // Even
+    return ( (sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
+  } else {
+    //Odd
+    return sorted[mid];
+  }
+
+}
+
 export const isGoodPixel = (a_Number: number) => {
     const bad = new Set([3, 6, 9])
     return !bad.has( a_Number )

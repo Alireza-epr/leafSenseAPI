@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { cache } from "../server";
 import {fromUrl, TypedArray} from "geotiff";
-import { computeNDVI, getMeanNDVI, getTokenCollection, isGeoJSONValid, isGoodPixel, lonLatToPixel, upscaleSCL } from "../utils/generalUtils";
+import { computeNDVI, getMeanNDVI, getMedianNDVI, getTokenCollection, isGeoJSONValid, isGoodPixel, lonLatToPixel, upscaleSCL } from "../utils/generalUtils";
 
 
 export const zonalNDVIController = async (req: Request, res: Response) => {
@@ -61,7 +61,8 @@ export const zonalNDVIController = async (req: Request, res: Response) => {
         x4 === undefined || y4 === undefined
     ){
         return res.json({
-            NDVI: null,
+            meanNDVI: null,
+            medianNDVI: null,
             valid: false,
             validity: 0,
             reason: "Pixels are undefined",
@@ -81,7 +82,8 @@ export const zonalNDVIController = async (req: Request, res: Response) => {
     const sclVal = await scl.readRasters({ window });
     if(!redVal || !nirVal || !sclVal){
         return res.json({
-            NDVI: null,
+            meanNDVI: null,
+            medianNDVI: null,
             valid: false,
             validity: 0,
             reason: "Rasters are undefined",
@@ -111,7 +113,8 @@ export const zonalNDVIController = async (req: Request, res: Response) => {
     const validity = (validPixels / upscaledSCL.length) 
     if (validPixels == 0) {
         return res.json({
-            NDVI: null,
+            meanNDVI: null,
+            medianNDVI: null,
             valid: false,
             validity: 0,
             reason: "Cloud or shadow mask",
@@ -121,9 +124,11 @@ export const zonalNDVIController = async (req: Request, res: Response) => {
     // --- Compute NDVI ---
     const ndviArray = computeNDVI(redVal[0] as TypedArray, nirVal[0] as TypedArray, sclVal[0] as TypedArray);
     const meanNDVI = getMeanNDVI(ndviArray)
+    const medianNDVI = getMedianNDVI(ndviArray)
     
     const result = {
-        NDVI: meanNDVI,
+        meanNDVI: meanNDVI,
+        medianNDVI: medianNDVI,
         valid: true,
         validity: validity,
         cache: "miss"
