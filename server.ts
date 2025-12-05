@@ -18,7 +18,7 @@ app.use(bodyParser.json());
 
 const port = process.env.PORT || 8000
 
-app.get("/point-ndvi", pointNDVIController );
+app.post("/point-ndvi", pointNDVIController );
  
 app.post("/zonal-ndvi", zonalNDVIController);
 

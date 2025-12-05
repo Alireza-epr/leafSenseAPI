@@ -16,3 +16,12 @@ export enum ESTACURLS {
 export enum ESTACCollections {
   Sentinel2l2a = "sentinel-2-l2a",
 }
+
+export type TPercentage = `${number}%`
+export interface INDVIResp {
+  meanNDVI: null | number,
+  medianNDVI: null | number,
+  validity: TPercentage,
+  reason?: string,
+  cache: "miss" | "hit"
+}

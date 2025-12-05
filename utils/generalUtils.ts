@@ -1,5 +1,5 @@
-import { GeoTIFFImage, TypedArray } from "geotiff"
-import { ESTACCollections, ESTACURLS, ITokenCollection } from "../types/generalTypes"
+import { GeoTIFFImage, ReadRasterResult, TypedArray, fromUrl} from "geotiff"
+import { ESTACCollections, ESTACURLS, ITokenCollection, TPercentage } from "../types/generalTypes"
 import proj4 from "proj4";
 
 export class CacheHandler {
@@ -95,7 +95,7 @@ export let tokenCollection: ITokenCollection | null = null;
 export let tokenPromise: Promise<ITokenCollection> | null = null;
 
 export const getTokenCollection = async () => {
-    if (tokenCollection && isTokenExpired(tokenCollection)) {
+    if (tokenCollection && !isTokenExpired(tokenCollection)) {
       return tokenCollection.token;
     }
 
@@ -175,7 +175,7 @@ export const getMedianNDVI = (
   const sorted = Float32Array.from(a_NDVI).sort((a, b) => a - b);
   const len = sorted.length
   if(len == 1){
-    return sorted[0]
+    return sorted[0] as number
   }
   const mid = Math.floor(len / 2);
   if(len % 2){
@@ -183,7 +183,7 @@ export const getMedianNDVI = (
     return ( (sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
   } else {
     //Odd
-    return sorted[mid];
+    return sorted[mid] as number;
   }
 
 }
@@ -193,7 +193,7 @@ export const isGoodPixel = (a_Number: number) => {
     return !bad.has( a_Number )
 }
 
-export const upscaleSCL = (scl: number | TypedArray, sclWidth: number, sclHeight: number, targetWidth: number, targetHeight: number) => {
+export const getUpscaledSCL = (scl: number | TypedArray, sclWidth: number, sclHeight: number, targetWidth: number, targetHeight: number) => {
   const out = new Uint8Array(targetWidth * targetHeight);
 
   // Compute scale ratios between target (red) and source (scl)
@@ -257,4 +257,132 @@ export const isGeoJSONValid = (a_Value: any) => {
 
   return true
 
+}
+
+export const getImages = async (a_Red: string, a_Nir: string, a_SCL: string) => {
+  // --- Sign URLs ---
+  const token = await getTokenCollection()
+  const cog_red_signed = `${a_Red}?${token}`
+  const cog_nir_signed = `${a_Nir}?${token}`
+  const cog_scl_signed = `${a_SCL}?${token}`
+
+  // --- Load COGs ---
+  const redTiff = await fromUrl(cog_red_signed as string);
+  const nirTiff = await fromUrl(cog_nir_signed as string);
+  const sclTiff = await fromUrl(cog_scl_signed as string);
+
+  const red = await redTiff.getImage();
+  const nir = await nirTiff.getImage();
+  const scl = await sclTiff.getImage();
+
+  return { red, nir, scl }
+}
+
+export const getWindow = (a_GeoJSON: any,a_Red: GeoTIFFImage ) => {
+  // ---- Convert lat/lon -> pixel coords ----
+  if(!isGeoJSONValid(a_GeoJSON)){
+    throw new Error("GeoJSON parameter is not valid") 
+  }
+
+  const [ [lon1, lat1], [lon2, lat2], [lon3, lat3], [lon4, lat4] ] = a_GeoJSON 
+  const [x1, y1] = lonLatToPixel(a_Red, Number(lon1), Number(lat1));
+  const [x2, y2] = lonLatToPixel(a_Red, Number(lon2), Number(lat2));
+  const [x3, y3] = lonLatToPixel(a_Red, Number(lon3), Number(lat3));
+  const [x4, y4] = lonLatToPixel(a_Red, Number(lon4), Number(lat4));
+
+  if(  
+      x1 === undefined || y1 === undefined ||
+      x2 === undefined || y2 === undefined ||
+      x3 === undefined || y3 === undefined ||
+      x4 === undefined || y4 === undefined
+  ){
+    throw new Error("Pixels are undefined") 
+  }
+
+  const minX = Math.min(x1, x2, x3, x4)
+  const maxX = Math.max(x1, x2, x3, x4)
+  const minY = Math.min(y1, y2, y3, y4)
+  const maxY = Math.max(y1, y2, y3, y4)
+
+  let window = [minX, minY, maxX, maxY]
+
+  return window
+}
+
+export const getSmallWindow = (a_Lon: number, a_Lat: number, a_Red: GeoTIFFImage ) => {
+  // ---- Convert lat/lon -> pixel coords ----
+  const [x, y] = lonLatToPixel(a_Red, Number(a_Lon), Number(a_Lat));
+
+  if(x === undefined || y === undefined ){
+    throw new Error("Pixels are undefined")
+  }
+
+  let window = [x, y, x + 1, y + 1]
+
+  return window
+}
+
+export const getRasterValues = async (a_Red: GeoTIFFImage, a_Nir: GeoTIFFImage, a_SCL: GeoTIFFImage, a_Window: number[]) => {
+  // ---- Read window ----
+  const redVal = await a_Red.readRasters({ window: a_Window });
+  const nirVal = await a_Nir.readRasters({ window: a_Window });
+  const sclVal = await a_SCL.readRasters({ window: a_Window });
+  if(!redVal || !nirVal || !sclVal){
+    throw new Error("Rasters are undefined")
+  }
+
+  return { redVal, nirVal, sclVal }
+}
+
+export const getValidity = (a_UpscaledSCL: Uint8Array<ArrayBuffer>) : TPercentage => {
+  // --- Mask using SCL ---
+  let validPixels = 0
+  let notValidPixels = 0
+  a_UpscaledSCL.forEach((scl)=>{
+    if(isGoodPixel(scl)){
+      ++validPixels
+    } else {
+      ++notValidPixels
+    }
+  })
+  
+  if (validPixels == 0) {
+    throw new Error("Cloud or shadow mask/ No valid pixel")
+  }
+
+  const validity = (validPixels / a_UpscaledSCL.length) * 100
+
+  return `${validity}%`
+
+}
+
+export const getNDVI = (a_RedVal: ReadRasterResult, a_NirVal: ReadRasterResult, a_SCLVal: ReadRasterResult ) => {
+  const ndviArray = computeNDVI(a_RedVal[0] as TypedArray, a_NirVal[0] as TypedArray, a_SCLVal[0] as TypedArray);
+  const meanNDVI = getMeanNDVI(ndviArray)
+  const medianNDVI = getMedianNDVI(ndviArray)
+
+  return { meanNDVI, medianNDVI }
+}
+
+export const computeNDVIFromImages = async (a_Red: GeoTIFFImage, a_Nir: GeoTIFFImage, a_SCL: GeoTIFFImage, a_Window: number[]) => {
+  const {redVal, nirVal, sclVal} = await getRasterValues(
+    a_Red, 
+    a_Nir, 
+    a_SCL, 
+    a_Window
+  )
+  
+  const upscaledSCL: Uint8Array<ArrayBuffer> = getUpscaledSCL(
+      sclVal[0] as TypedArray, 
+      sclVal.width,
+      sclVal.height,
+      redVal.width,
+      redVal.height
+  )
+  
+  const validity = getValidity(upscaledSCL)
+
+  const { meanNDVI, medianNDVI } = getNDVI(redVal, nirVal, sclVal)
+
+  return { meanNDVI, medianNDVI, validity }
 }
