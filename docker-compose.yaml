@@ -1,0 +1,7 @@
+services:
+  leafsense-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      NODE_ENV: production
